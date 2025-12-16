@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Clayton's Radar Mosaic</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    body { background-color: #cce6ff; font-family: Arial, sans-serif; }
+    .leaflet-control-attribution { font-size: 11px; }
+
+    #logo-text {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1000;
+      background: rgba(255, 255, 255, 0.8);
+      padding: 5px 10px;
+      border-radius: 8px;
+      color: #0077cc;
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    #slider-container {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255, 255, 255, 0.9);
+      padding: 12px;
+      border-radius: 10px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    #radarSlider {
+      width: 300px;
+    }
+
+    #timeLabel {
+      margin: 5px 0;
+      font-size: 14px;
+    }
+
+    #playButton {
+      margin-top: 5px;
+      padding: 5px 12px;
+      background: #0077cc;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    #playButton:hover {
+      background: #005fa3;
+    }
+  </style>
+</head>
+<body>
+  <div id="logo-text">Clayton's Weather</div>
+  <div id="map"></div>
+  <div id="slider-container">
+    <span id="timeLabel">Loading radar...</span>
+    <input type="range" id="radarSlider" min="0" max="5" value="0">
+    <button id="playButton">Play</button>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([31.5, -99.3], 6);
+
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    let radarTimestamps = [];
+    let radarLayers = [];
+    let currentLayer = 0;
+    let slider = document.getElementById('radarSlider');
+    let playButton = document.getElementById('playButton');
+    let timeLabel = document.getElementById('timeLabel');
+    let playing = false;
+    let animationInterval = null;
+
+    function updateTimeLabel(index) {
+      const ts = radarTimestamps[index];
+      if (!ts) return;
+      const date = new Date(ts * 1000);
+      timeLabel.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function showLayer(index) {
+      radarLayers[currentLayer].setOpacity(0);
+      currentLayer = index;
+      radarLayers[currentLayer].setOpacity(0.7);
+      slider.value = currentLayer;
+      updateTimeLabel(currentLayer);
+    }
+
+    function playAnimation() {
+      animationInterval = setInterval(() => {
+        let nextLayer = (currentLayer + 1) % radarLayers.length;
+        showLayer(nextLayer);
+      }, 1000);
+    }
+
+    function stopAnimation() {
+      clearInterval(animationInterval);
+      animationInterval = null;
+    }
+
+    playButton.addEventListener('click', () => {
+      playing = !playing;
+      playButton.textContent = playing ? 'Pause' : 'Play';
+      if (playing) {
+        playAnimation();
+      } else {
+        stopAnimation();
+      }
+    });
+
+    slider.addEventListener('input', () => {
+      showLayer(parseInt(slider.value));
+    });
+
+    fetch('https://tilecache.rainviewer.com/api/maps.json')
+      .then(response => response.json())
+      .then(data => {
+        radarTimestamps = data.slice(-6);
+        radarLayers = radarTimestamps.map(ts => {
+          const layer = L.tileLayer(`https://tilecache.rainviewer.com/v2/radar/${ts}/256/{z}/{x}/{y}/2/1_1.png`, {
+            opacity: 0,
+            tileSize: 256
+          }).addTo(map);
+          return layer;
+        });
+        radarLayers[0].setOpacity(0.7);
+        updateTimeLabel(0);
+      });
+
+    const warningsURL = 'https://api.weather.gov/alerts/active?status=actual&message_type=alert';
+
+    fetch(warningsURL)
+      .then(res => res.json())
+      .then(data => {
+        const warningLayer = L.geoJSON(data, {
+          style: feature => ({
+            color: '#ff0000',
+            weight: 2,
+            fillOpacity: 0.3
+          }),
+          onEachFeature: (feature, layer) => {
+            // Create a more detailed popup with full description of the alert
+            const alertDetails = `
+              <strong>${feature.properties.event}</strong><br>
+              <strong>Area: </strong>${feature.properties.areaDesc}<br>
+              <strong>Sent: </strong>${new Date(feature.properties.sent).toLocaleString()}<br>
+              <strong>Description: </strong>${feature.properties.description || 'No description available.'}<br>
+              <strong>Instructions: </strong>${feature.properties.instruction || 'No instructions available.'}
+            `;
+            layer.bindPopup(alertDetails);
+          }
+        });
+        warningLayer.addTo(map);
+      });
+
+    // Lightning strike layer (mocked with an example GeoJSON source)
+    fetch('https://geojson.io/data/lightning-strikes.json') // Replace with real-time source
+      .then(res => res.json())
+      .then(data => {
+        const lightningLayer = L.geoJSON(data, {
+          pointToLayer: (feature, latlng) => {
+            return L.circleMarker(latlng, {
+              radius: 4,
+              fillColor: '#ffff00',
+              color: '#ffcc00',
+              weight: 1,
+              opacity: 1,
+              fillOpacity: 0.8
+            });
+          },
+          onEachFeature: (feature, layer) => {
+            layer.bindPopup(`⚡ Lightning Strike<br>${new Date(feature.properties.time).toLocaleString()}`);
+          }
+        });
+        lightningLayer.addTo(map);
+      });
+  </script>
+</body>
+</html>
