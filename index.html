@@ -1,195 +1,280 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Clayton's Radar Mosaic</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <style>
-    html, body, #map { height: 100%; margin: 0; }
-    body { background-color: #cce6ff; font-family: Arial, sans-serif; }
-    .leaflet-control-attribution { font-size: 11px; }
+<meta charset="UTF-8">
+<title>Clayton's Weather – Radar</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    #logo-text {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 1000;
-      background: rgba(255, 255, 255, 0.8);
-      padding: 5px 10px;
-      border-radius: 8px;
-      color: #0077cc;
-      font-size: 20px;
-      font-weight: bold;
-    }
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    #slider-container {
-      position: absolute;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(255, 255, 255, 0.9);
-      padding: 12px;
-      border-radius: 10px;
-      z-index: 1000;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
+<style>
+html, body {
+  margin: 0;
+  height: 100%;
+}
+#map {
+  width: 100%;
+  height: 100%;
+  background: #cfe9f7;
+}
 
-    #radarSlider {
-      width: 300px;
-    }
+/* Top-left branding */
+#branding {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1100;
+  background: rgba(0,0,0,0.65);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-weight: bold;
+  font-size: 16px;
+}
 
-    #timeLabel {
-      margin: 5px 0;
-      font-size: 14px;
-    }
+/* Bottom controls */
+#controls {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  background: rgba(0,0,0,0.65);
+  padding: 12px 20px;
+  display: flex;
+  justify-content: space-evenly;
+  align-items: center;
+  gap: 18px;
+  z-index: 1000;
+  box-sizing: border-box;
+  flex-wrap: wrap;
+}
 
-    #playButton {
-      margin-top: 5px;
-      padding: 5px 12px;
-      background: #0077cc;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-    }
+.control {
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
 
-    #playButton:hover {
-      background: #005fa3;
-    }
-  </style>
+button {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+input[type="range"] {
+  width: 180px;
+}
+
+#timeLabel {
+  font-weight: bold;
+  white-space: nowrap;
+}
+</style>
 </head>
+
 <body>
-  <div id="logo-text">Clayton's Weather</div>
-  <div id="map"></div>
-  <div id="slider-container">
-    <span id="timeLabel">Loading radar...</span>
-    <input type="range" id="radarSlider" min="0" max="5" value="0">
-    <button id="playButton">Play</button>
+
+<div id="map"></div>
+
+<!-- Top-left text -->
+<div id="branding">Clayton's Weather</div>
+
+<div id="controls">
+  <div class="control">
+    <button id="playPause">▶ Play</button>
   </div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script>
-    const map = L.map('map').setView([31.5, -99.3], 6);
+  <div class="control" id="timeLabel">Radar Time: --</div>
 
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
+  <div class="control">
+    <input type="range" id="timeSlider" min="0" max="0" value="0">
+  </div>
 
-    let radarTimestamps = [];
-    let radarLayers = [];
-    let currentLayer = 0;
-    let slider = document.getElementById('radarSlider');
-    let playButton = document.getElementById('playButton');
-    let timeLabel = document.getElementById('timeLabel');
-    let playing = false;
-    let animationInterval = null;
+  <div class="control">
+    <label><input type="checkbox" id="alertsToggle"> NWS Alerts</label>
+  </div>
 
-    function updateTimeLabel(index) {
-      const ts = radarTimestamps[index];
-      if (!ts) return;
-      const date = new Date(ts * 1000);
-      timeLabel.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
+  <div class="control">
+    <label><input type="checkbox" id="spcToggle"> SPC Outlook</label>
+  </div>
 
-    function showLayer(index) {
-      radarLayers[currentLayer].setOpacity(0);
-      currentLayer = index;
-      radarLayers[currentLayer].setOpacity(0.7);
-      slider.value = currentLayer;
-      updateTimeLabel(currentLayer);
-    }
+  <div class="control">
+    <button id="texasBtn">Texas</button>
+  </div>
+</div>
 
-    function playAnimation() {
-      animationInterval = setInterval(() => {
-        let nextLayer = (currentLayer + 1) % radarLayers.length;
-        showLayer(nextLayer);
-      }, 1000);
-    }
+<script>
+/* ---------------- MAP ---------------- */
+const map = L.map("map", {
+  center: [31, -99],
+  zoom: 6
+});
 
-    function stopAnimation() {
-      clearInterval(animationInterval);
-      animationInterval = null;
-    }
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution: "© OpenStreetMap"
+}).addTo(map);
 
-    playButton.addEventListener('click', () => {
-      playing = !playing;
-      playButton.textContent = playing ? 'Pause' : 'Play';
-      if (playing) {
-        playAnimation();
-      } else {
-        stopAnimation();
-      }
+/* ---------------- RADAR ---------------- */
+const RADAR_OPACITY = 0.7;
+const FRAME_DELAY = 600;
+
+let frames = [];
+let layers = [];
+let index = 0;
+let playing = false;
+let timer = null;
+
+const slider = document.getElementById("timeSlider");
+const label = document.getElementById("timeLabel");
+const playBtn = document.getElementById("playPause");
+
+function loadRadar() {
+  layers.forEach(l => map.removeLayer(l));
+  layers = [];
+
+  fetch("https://api.rainviewer.com/public/weather-maps.json")
+    .then(r => r.json())
+    .then(data => {
+      frames = data.radar.past.slice(-12);
+      slider.max = frames.length - 1;
+
+      frames.forEach((f, i) => {
+        const layer = L.tileLayer(
+          `https://tilecache.rainviewer.com/v2/radar/${f.time}/256/{z}/{x}/{y}/2/1_1.png`,
+          { opacity: i === 0 ? RADAR_OPACITY : 0, zIndex: 10 }
+        ).addTo(map);
+        layers.push(layer);
+      });
+
+      updateTimeLabel(0);
     });
+}
 
-    slider.addEventListener('input', () => {
-      showLayer(parseInt(slider.value));
-    });
+function updateTimeLabel(i) {
+  const t = new Date(frames[i].time * 1000);
+  label.textContent = "Radar Time: " +
+    t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
 
-    fetch('https://tilecache.rainviewer.com/api/maps.json')
-      .then(response => response.json())
-      .then(data => {
-        radarTimestamps = data.slice(-6);
-        radarLayers = radarTimestamps.map(ts => {
-          const layer = L.tileLayer(`https://tilecache.rainviewer.com/v2/radar/${ts}/256/{z}/{x}/{y}/2/1_1.png`, {
-            opacity: 0,
-            tileSize: 256
-          }).addTo(map);
-          return layer;
-        });
-        radarLayers[0].setOpacity(0.7);
-        updateTimeLabel(0);
-      });
+function showFrame(i) {
+  layers[index].setOpacity(0);
+  index = i;
+  layers[index].setOpacity(RADAR_OPACITY);
+  slider.value = i;
+  updateTimeLabel(i);
+}
 
-    const warningsURL = 'https://api.weather.gov/alerts/active?status=actual&message_type=alert';
+playBtn.onclick = () => {
+  playing = !playing;
+  if (playing) {
+    timer = setInterval(() => {
+      showFrame((index + 1) % layers.length);
+    }, FRAME_DELAY);
+    playBtn.textContent = "⏸ Pause";
+  } else {
+    clearInterval(timer);
+    playBtn.textContent = "▶ Play";
+  }
+};
 
-    fetch(warningsURL)
-      .then(res => res.json())
-      .then(data => {
-        const warningLayer = L.geoJSON(data, {
-          style: feature => ({
-            color: '#ff0000',
-            weight: 2,
-            fillOpacity: 0.3
-          }),
-          onEachFeature: (feature, layer) => {
-            // Create a more detailed popup with full description of the alert
-            const alertDetails = `
-              <strong>${feature.properties.event}</strong><br>
-              <strong>Area: </strong>${feature.properties.areaDesc}<br>
-              <strong>Sent: </strong>${new Date(feature.properties.sent).toLocaleString()}<br>
-              <strong>Description: </strong>${feature.properties.description || 'No description available.'}<br>
-              <strong>Instructions: </strong>${feature.properties.instruction || 'No instructions available.'}
-            `;
-            layer.bindPopup(alertDetails);
-          }
-        });
-        warningLayer.addTo(map);
-      });
+slider.oninput = e => {
+  clearInterval(timer);
+  playing = false;
+  playBtn.textContent = "▶ Play";
+  showFrame(+e.target.value);
+};
 
-    // Lightning strike layer (mocked with an example GeoJSON source)
-    fetch('https://geojson.io/data/lightning-strikes.json') // Replace with real-time source
-      .then(res => res.json())
-      .then(data => {
-        const lightningLayer = L.geoJSON(data, {
-          pointToLayer: (feature, latlng) => {
-            return L.circleMarker(latlng, {
-              radius: 4,
-              fillColor: '#ffff00',
-              color: '#ffcc00',
-              weight: 1,
-              opacity: 1,
-              fillOpacity: 0.8
-            });
-          },
-          onEachFeature: (feature, layer) => {
-            layer.bindPopup(`⚡ Lightning Strike<br>${new Date(feature.properties.time).toLocaleString()}`);
-          }
-        });
-        lightningLayer.addTo(map);
-      });
-  </script>
+loadRadar();
+
+/* ---------------- NWS ALERTS ---------------- */
+let alertsLayer = L.layerGroup();
+
+fetch("https://api.weather.gov/alerts/active")
+  .then(r => r.json())
+  .then(data => {
+    alertsLayer.addLayer(
+      L.geoJSON(data, {
+        style: { color: "#ff0000", weight: 2, fillOpacity: 0.25 },
+        onEachFeature: (f, l) =>
+          l.bindPopup(`<b>${f.properties.event}</b><br>${f.properties.areaDesc}`)
+      })
+    );
+  });
+
+document.getElementById("alertsToggle").onchange = e => {
+  e.target.checked ? alertsLayer.addTo(map) : map.removeLayer(alertsLayer);
+};
+
+/* ---------------- SPC OUTLOOK ---------------- */
+const SPC_COLORS = {
+  TSTM: "#7cd67c",
+  MRGL: "#2ecc71",
+  SLGT: "#f1c40f",
+  ENH: "#e67e22",
+  MDT: "#e74c3c",
+  HIGH: "#c0392b"
+};
+
+const SPC_NAMES = {
+  TSTM: "General Thunderstorms",
+  MRGL: "Marginal Risk",
+  SLGT: "Slight Risk",
+  ENH: "Enhanced Risk",
+  MDT: "Moderate Risk",
+  HIGH: "High Risk"
+};
+
+let spcLayer = L.layerGroup();
+
+fetch("https://www.spc.noaa.gov/products/outlook/day1otlk_cat.lyr.geojson")
+  .then(r => r.json())
+  .then(data => {
+    spcLayer.addLayer(
+      L.geoJSON(data, {
+        style: f => {
+          const cat =
+            f.properties.label ||
+            f.properties.cat ||
+            f.properties.risk ||
+            "TSTM";
+
+          return {
+            color: SPC_COLORS[cat],
+            fillColor: SPC_COLORS[cat],
+            fillOpacity: 0.4,
+            weight: 1
+          };
+        },
+        onEachFeature: (f, l) => {
+          const cat =
+            f.properties.label ||
+            f.properties.cat ||
+            f.properties.risk ||
+            "TSTM";
+
+          l.on("click", e => {
+            L.popup()
+              .setLatLng(e.latlng)
+              .setContent(`<b>${SPC_NAMES[cat]}</b>`)
+              .openOn(map);
+          });
+        }
+      })
+    );
+  });
+
+document.getElementById("spcToggle").onchange = e => {
+  e.target.checked ? spcLayer.addTo(map) : map.removeLayer(spcLayer);
+};
+
+/* ---------------- TEXAS BUTTON ---------------- */
+document.getElementById("texasBtn").onclick = () => {
+  map.setView([31, -99], 6);
+};
+</script>
+
 </body>
 </html>
