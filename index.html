@@ -19,173 +19,166 @@ html, body {
   background: #cfe9f7;
 }
 
-/* Top-left branding */
 #branding {
   position: absolute;
   top: 10px;
   left: 10px;
   z-index: 1100;
-  background: rgba(0,0,0,0.65);
+  background: rgba(0,0,0,0.7);
   color: white;
   padding: 6px 12px;
   border-radius: 6px;
   font-weight: bold;
-  font-size: 16px;
 }
 
-/* Bottom controls */
 #controls {
   position: absolute;
   bottom: 0;
   width: 100%;
-  background: rgba(0,0,0,0.65);
-  padding: 12px 20px;
+  background: rgba(0,0,0,0.7);
+  padding: 10px;
   display: flex;
   justify-content: space-evenly;
   align-items: center;
-  gap: 18px;
   z-index: 1000;
-  box-sizing: border-box;
   flex-wrap: wrap;
-}
-
-.control {
-  color: white;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
+  gap: 10px;
 }
 
 button {
-  padding: 6px 14px;
-  border: none;
+  padding: 6px 12px;
   border-radius: 5px;
+  border: none;
   cursor: pointer;
 }
 
 input[type="range"] {
-  width: 180px;
+  width: 160px;
 }
 
 #timeLabel {
+  color: white;
   font-weight: bold;
-  white-space: nowrap;
 }
 </style>
 </head>
 
 <body>
 
+<div id="branding">Clayton's Weather Radar</div>
 <div id="map"></div>
 
-<!-- Top-left text -->
-<div id="branding">Clayton's Weather</div>
-
 <div id="controls">
-  <div class="control">
-    <button id="playPause">▶ Play</button>
-  </div>
+  <button id="playBtn">▶</button>
+  <input type="range" id="slider" min="0" max="0" value="0">
+  <span id="timeLabel"></span>
 
-  <div class="control" id="timeLabel">Radar Time: --</div>
+  <label style="color:white;">
+    <input type="checkbox" id="alertsToggle" checked> Alerts
+  </label>
 
-  <div class="control">
-    <input type="range" id="timeSlider" min="0" max="0" value="0">
-  </div>
-
-  <div class="control">
-    <label><input type="checkbox" id="alertsToggle"> NWS Alerts</label>
-  </div>
-
-  <div class="control">
-    <label><input type="checkbox" id="spcToggle"> SPC Outlook</label>
-  </div>
-
-  <div class="control">
-    <button id="texasBtn">Texas</button>
-  </div>
+  <button id="texasBtn">Texas</button>
 </div>
 
 <script>
 /* ---------------- MAP ---------------- */
-const map = L.map("map", {
-  center: [31, -99],
-  zoom: 6
-});
+const map = L.map('map', {
+  zoomSnap: 0.25,
+  zoomDelta: 0.5,
+  preferCanvas: true
+}).setView([29.5, -95], 6);
 
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  attribution: "© OpenStreetMap"
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18
 }).addTo(map);
 
 /* ---------------- RADAR ---------------- */
-const RADAR_OPACITY = 0.7;
-const FRAME_DELAY = 600;
-
 let frames = [];
 let layers = [];
 let index = 0;
 let playing = false;
 let timer = null;
 
-const slider = document.getElementById("timeSlider");
+const slider = document.getElementById("slider");
 const label = document.getElementById("timeLabel");
-const playBtn = document.getElementById("playPause");
+const playBtn = document.getElementById("playBtn");
 
-function loadRadar() {
+async function loadRadar() {
+  const res = await fetch("https://api.rainviewer.com/public/weather-maps.json");
+  const data = await res.json();
+
+  const host = data.host;
+
+  // ✅ Use both past + nowcast
+  frames = [...data.radar.past, ...data.radar.nowcast].slice(-8);
+
+  // clear old layers
   layers.forEach(l => map.removeLayer(l));
   layers = [];
 
-  fetch("https://api.rainviewer.com/public/weather-maps.json")
-    .then(r => r.json())
-    .then(data => {
-      frames = data.radar.past.slice(-12);
-      slider.max = frames.length - 1;
+  frames.forEach((frame, i) => {
+    const layer = L.tileLayer(
+      `${host}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`,
+      {
+        opacity: i === 0 ? 0.7 : 0,
+        tileSize: 256,
+        crossOrigin: true
+      }
+    ).addTo(map);
 
-      frames.forEach((f, i) => {
-        const layer = L.tileLayer(
-          `https://tilecache.rainviewer.com/v2/radar/${f.time}/256/{z}/{x}/{y}/2/1_1.png`,
-          { opacity: i === 0 ? RADAR_OPACITY : 0, zIndex: 10 }
-        ).addTo(map);
-        layers.push(layer);
-      });
+    layers.push(layer);
+  });
 
-      updateTimeLabel(0);
-    });
+  slider.max = layers.length - 1;
+  updateTimeLabel(0);
 }
 
 function updateTimeLabel(i) {
+  if (!frames[i]) return;
   const t = new Date(frames[i].time * 1000);
-  label.textContent = "Radar Time: " +
-    t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  label.textContent = t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
 function showFrame(i) {
+  if (!layers.length) return;
+
   layers[index].setOpacity(0);
   index = i;
-  layers[index].setOpacity(RADAR_OPACITY);
+  layers[index].setOpacity(0.7);
+
   slider.value = i;
   updateTimeLabel(i);
 }
 
+/* Animation */
 playBtn.onclick = () => {
   playing = !playing;
+
   if (playing) {
     timer = setInterval(() => {
       showFrame((index + 1) % layers.length);
-    }, FRAME_DELAY);
-    playBtn.textContent = "⏸ Pause";
+    }, 600);
+    playBtn.textContent = "⏸";
   } else {
     clearInterval(timer);
-    playBtn.textContent = "▶ Play";
+    playBtn.textContent = "▶";
   }
 };
 
+/* Slider */
 slider.oninput = e => {
   clearInterval(timer);
   playing = false;
-  playBtn.textContent = "▶ Play";
+  playBtn.textContent = "▶";
   showFrame(+e.target.value);
 };
+
+/* Stop animation on interaction (prevents crash) */
+map.on("zoomstart movestart", () => {
+  clearInterval(timer);
+  playing = false;
+  playBtn.textContent = "▶";
+});
 
 loadRadar();
 
@@ -195,79 +188,29 @@ let alertsLayer = L.layerGroup();
 fetch("https://api.weather.gov/alerts/active")
   .then(r => r.json())
   .then(data => {
-    alertsLayer.addLayer(
-      L.geoJSON(data, {
-        style: { color: "#ff0000", weight: 2, fillOpacity: 0.25 },
-        onEachFeature: (f, l) =>
-          l.bindPopup(`<b>${f.properties.event}</b><br>${f.properties.areaDesc}`)
-      })
-    );
+    const geo = L.geoJSON(data, {
+      style: {
+        color: "#ff0000",
+        weight: 2,
+        fillOpacity: 0.2
+      },
+      onEachFeature: (f, l) => {
+        l.bindPopup(`<b>${f.properties.event}</b><br>${f.properties.areaDesc}`);
+      }
+    });
+
+    alertsLayer.addLayer(geo);
+
+    // ✅ Show by default
+    alertsLayer.addTo(map);
   });
 
 document.getElementById("alertsToggle").onchange = e => {
-  e.target.checked ? alertsLayer.addTo(map) : map.removeLayer(alertsLayer);
-};
-
-/* ---------------- SPC OUTLOOK ---------------- */
-const SPC_COLORS = {
-  TSTM: "#7cd67c",
-  MRGL: "#2ecc71",
-  SLGT: "#f1c40f",
-  ENH: "#e67e22",
-  MDT: "#e74c3c",
-  HIGH: "#c0392b"
-};
-
-const SPC_NAMES = {
-  TSTM: "General Thunderstorms",
-  MRGL: "Marginal Risk",
-  SLGT: "Slight Risk",
-  ENH: "Enhanced Risk",
-  MDT: "Moderate Risk",
-  HIGH: "High Risk"
-};
-
-let spcLayer = L.layerGroup();
-
-fetch("https://www.spc.noaa.gov/products/outlook/day1otlk_cat.lyr.geojson")
-  .then(r => r.json())
-  .then(data => {
-    spcLayer.addLayer(
-      L.geoJSON(data, {
-        style: f => {
-          const cat =
-            f.properties.label ||
-            f.properties.cat ||
-            f.properties.risk ||
-            "TSTM";
-
-          return {
-            color: SPC_COLORS[cat],
-            fillColor: SPC_COLORS[cat],
-            fillOpacity: 0.4,
-            weight: 1
-          };
-        },
-        onEachFeature: (f, l) => {
-          const cat =
-            f.properties.label ||
-            f.properties.cat ||
-            f.properties.risk ||
-            "TSTM";
-
-          l.on("click", e => {
-            L.popup()
-              .setLatLng(e.latlng)
-              .setContent(`<b>${SPC_NAMES[cat]}</b>`)
-              .openOn(map);
-          });
-        }
-      })
-    );
-  });
-
-document.getElementById("spcToggle").onchange = e => {
-  e.target.checked ? spcLayer.addTo(map) : map.removeLayer(spcLayer);
+  if (e.target.checked) {
+    alertsLayer.addTo(map);
+  } else {
+    map.removeLayer(alertsLayer);
+  }
 };
 
 /* ---------------- TEXAS BUTTON ---------------- */
