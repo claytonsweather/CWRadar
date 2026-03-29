@@ -2,70 +2,80 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Clayton's Weather – Radar</title>
+<title>Clayton's Weather Radar</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <style>
-html, body {
-  margin: 0;
-  height: 100%;
-}
-#map {
-  width: 100%;
-  height: 100%;
-  background: #cfe9f7;
-}
+html, body { margin:0; height:100%; }
+#map { width:100%; height:100%; }
 
-#branding {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 1100;
-  background: rgba(0,0,0,0.7);
-  color: white;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-weight: bold;
-}
-
+/* Controls */
 #controls {
-  position: absolute;
-  bottom: 0;
-  width: 100%;
-  background: rgba(0,0,0,0.7);
-  padding: 10px;
-  display: flex;
-  justify-content: space-evenly;
-  align-items: center;
-  z-index: 1000;
-  flex-wrap: wrap;
-  gap: 10px;
+  position:absolute;
+  bottom:0;
+  width:100%;
+  background:rgba(0,0,0,0.75);
+  padding:10px;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:10px;
+  z-index:1000;
+  flex-wrap:wrap;
 }
 
 button {
-  padding: 6px 12px;
-  border-radius: 5px;
-  border: none;
-  cursor: pointer;
+  padding:6px 12px;
+  border:none;
+  border-radius:6px;
+  cursor:pointer;
 }
 
-input[type="range"] {
-  width: 160px;
-}
+input[type="range"] { width:140px; }
 
 #timeLabel {
-  color: white;
-  font-weight: bold;
+  color:white;
+  font-weight:bold;
 }
+
+/* Side Panel */
+#panel {
+  position:absolute;
+  right:0;
+  top:0;
+  width:320px;
+  height:100%;
+  background:#111;
+  color:white;
+  padding:15px;
+  transform:translateX(100%);
+  transition:0.3s;
+  z-index:2000;
+  overflow-y:auto;
+}
+
+#panel.open {
+  transform:translateX(0);
+}
+
+#closePanel {
+  background:red;
+  color:white;
+  border:none;
+  padding:6px 10px;
+  cursor:pointer;
+  margin-bottom:10px;
+}
+
+label { color:white; }
 </style>
 </head>
 
 <body>
 
-<div id="branding">Clayton's Weather Radar</div>
 <div id="map"></div>
 
 <div id="controls">
@@ -73,56 +83,70 @@ input[type="range"] {
   <input type="range" id="slider" min="0" max="0" value="0">
   <span id="timeLabel"></span>
 
-  <label style="color:white;">
+  <label>
     <input type="checkbox" id="alertsToggle" checked> Alerts
   </label>
+</div>
 
-  <button id="texasBtn">Texas</button>
+<div id="panel">
+  <button id="closePanel">Close</button>
+  <div id="panelContent">Click an alert</div>
 </div>
 
 <script>
 /* ---------------- MAP ---------------- */
 const map = L.map('map', {
-  zoomSnap: 0.25,
-  zoomDelta: 0.5,
-  preferCanvas: true
-}).setView([29.5, -95], 6);
+  zoomSnap:0.25,
+  zoomDelta:0.5,
+  preferCanvas:true,
+  maxZoom:18
+}).setView([29.5,-95],6);
 
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 18
+/* Basemap */
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  subdomains:'abcd',
+  maxZoom:19
 }).addTo(map);
 
-/* ---------------- RADAR ---------------- */
+/* ---------------- NOAA BASE RADAR ---------------- */
+const baseRadar = L.tileLayer.wms(
+  "https://opengeo.ncep.noaa.gov/geoserver/conus/conus_bref_qcd/ows?",
+  {
+    layers: "conus_bref_qcd",
+    format: "image/png",
+    transparent: true,
+    opacity: 0.5
+  }
+).addTo(map);
+
+/* ---------------- ANIMATION (RAINVIEWER) ---------------- */
 let frames = [];
 let layers = [];
 let index = 0;
-let playing = false;
 let timer = null;
 
 const slider = document.getElementById("slider");
 const label = document.getElementById("timeLabel");
 const playBtn = document.getElementById("playBtn");
 
-async function loadRadar() {
+async function loadAnimation(){
   const res = await fetch("https://api.rainviewer.com/public/weather-maps.json");
   const data = await res.json();
 
   const host = data.host;
 
-  // ✅ Use both past + nowcast
-  frames = [...data.radar.past, ...data.radar.nowcast].slice(-8);
+  frames = [...data.radar.past, ...data.radar.nowcast].slice(-6);
 
-  // clear old layers
   layers.forEach(l => map.removeLayer(l));
   layers = [];
 
-  frames.forEach((frame, i) => {
+  frames.forEach((f,i)=>{
     const layer = L.tileLayer(
-      `${host}${frame.path}/256/{z}/{x}/{y}/2/1_1.png`,
+      `${host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`,
       {
-        opacity: i === 0 ? 0.7 : 0,
-        tileSize: 256,
-        crossOrigin: true
+        opacity: i===0 ? 0.6 : 0,
+        maxNativeZoom: 8,
+        maxZoom: 18
       }
     ).addTo(map);
 
@@ -130,92 +154,95 @@ async function loadRadar() {
   });
 
   slider.max = layers.length - 1;
-  updateTimeLabel(0);
+  updateLabel(0);
 }
 
-function updateTimeLabel(i) {
-  if (!frames[i]) return;
+function updateLabel(i){
   const t = new Date(frames[i].time * 1000);
-  label.textContent = t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  label.textContent = t.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
 }
 
-function showFrame(i) {
-  if (!layers.length) return;
+function showFrame(i){
+  if(!layers.length) return;
 
   layers[index].setOpacity(0);
   index = i;
-  layers[index].setOpacity(0.7);
-
+  layers[index].setOpacity(0.6);
   slider.value = i;
-  updateTimeLabel(i);
+  updateLabel(i);
 }
 
-/* Animation */
-playBtn.onclick = () => {
-  playing = !playing;
-
-  if (playing) {
-    timer = setInterval(() => {
-      showFrame((index + 1) % layers.length);
-    }, 600);
-    playBtn.textContent = "⏸";
-  } else {
+/* ▶ Animation */
+playBtn.onclick = ()=>{
+  if(timer){
     clearInterval(timer);
+    timer = null;
     playBtn.textContent = "▶";
+  } else {
+    timer = setInterval(()=>{
+      showFrame((index+1) % layers.length);
+    }, 500);
+    playBtn.textContent = "⏸";
   }
 };
 
-/* Slider */
-slider.oninput = e => {
-  clearInterval(timer);
-  playing = false;
-  playBtn.textContent = "▶";
-  showFrame(+e.target.value);
+slider.oninput = e => showFrame(+e.target.value);
+
+loadAnimation();
+
+/* ---------------- ALERT PANEL ---------------- */
+const panel = document.getElementById("panel");
+const content = document.getElementById("panelContent");
+
+document.getElementById("closePanel").onclick = ()=>{
+  panel.classList.remove("open");
 };
 
-/* Stop animation on interaction (prevents crash) */
-map.on("zoomstart movestart", () => {
-  clearInterval(timer);
-  playing = false;
-  playBtn.textContent = "▶";
-});
-
-loadRadar();
-
-/* ---------------- NWS ALERTS ---------------- */
+/* ---------------- ALERTS ---------------- */
 let alertsLayer = L.layerGroup();
 
+function getColor(event){
+  if(!event) return "#ff0000";
+  if(event.includes("Tornado")) return "#ff0000";
+  if(event.includes("Severe Thunderstorm")) return "#ff9900";
+  if(event.includes("Flash Flood")) return "#00e5ff";
+  if(event.includes("Flood")) return "#00bfff";
+  return "#ffcc00";
+}
+
 fetch("https://api.weather.gov/alerts/active")
-  .then(r => r.json())
-  .then(data => {
-    const geo = L.geoJSON(data, {
-      style: {
-        color: "#ff0000",
-        weight: 2,
-        fillOpacity: 0.2
-      },
-      onEachFeature: (f, l) => {
-        l.bindPopup(`<b>${f.properties.event}</b><br>${f.properties.areaDesc}`);
-      }
-    });
+.then(r=>r.json())
+.then(data=>{
+  const geo = L.geoJSON(data,{
+    style:f=>({
+      color:getColor(f.properties.event),
+      weight:2,
+      fillOpacity:0.25
+    }),
 
-    alertsLayer.addLayer(geo);
+    onEachFeature:(f,layer)=>{
+      layer.on("click", ()=>{
+        const p = f.properties;
 
-    // ✅ Show by default
-    alertsLayer.addTo(map);
+        content.innerHTML = `
+          <h2>${p.event}</h2>
+          <b>Area:</b> ${p.areaDesc}<br><br>
+          <b>Severity:</b> ${p.severity || "N/A"}<br><br>
+          <b>Headline:</b><br>${p.headline || ""}<br><br>
+          <b>Details:</b><br>${p.description || ""}
+        `;
+
+        panel.classList.add("open");
+      });
+    }
   });
 
-document.getElementById("alertsToggle").onchange = e => {
-  if (e.target.checked) {
-    alertsLayer.addTo(map);
-  } else {
-    map.removeLayer(alertsLayer);
-  }
-};
+  alertsLayer.addLayer(geo);
+  alertsLayer.addTo(map);
+});
 
-/* ---------------- TEXAS BUTTON ---------------- */
-document.getElementById("texasBtn").onclick = () => {
-  map.setView([31, -99], 6);
+document.getElementById("alertsToggle").onchange = e=>{
+  e.target.checked ? alertsLayer.addTo(map) : map.removeLayer(alertsLayer);
 };
 </script>
 
